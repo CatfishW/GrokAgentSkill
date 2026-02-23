@@ -5,6 +5,8 @@ Grok API CLI helper script.
 Usage:
     python grok_api.py chat "Your message here" [--model MODEL] [--stream] [--key KEY]
     python grok_api.py file messages.json [--model MODEL] [--stream]
+    python grok_api.py image "A red apple on a wooden table"
+    python grok_api.py video "A glowing figure rotating in the dark"
     python grok_api.py models
     python grok_api.py verify
 
@@ -14,6 +16,7 @@ Set GROK_API_KEY env var or pass --key to authenticate.
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.request
 import urllib.error
@@ -129,6 +132,63 @@ def cmd_verify(args):
         print(f"  {m}")
 
 
+def cmd_image(args):
+    key = get_key(args)
+    payload = {
+        "model": "grok-imagine-1.0",
+        "messages": [{"role": "user", "content": args.prompt}],
+    }
+    result = make_request("/chat/completions", key, payload)
+    content = result["choices"][0]["message"]["content"]
+    match = re.search(r'src="([^"]+)"', content)
+    if match:
+        print("Image URL:", match.group(1))
+    else:
+        print(content)
+
+
+def cmd_video(args):
+    key = get_key(args)
+    payload = {
+        "model": "grok-imagine-1.0-video",
+        "messages": [{"role": "user", "content": args.prompt}],
+    }
+    print("Generating video (this takes 20–90 seconds)...", file=sys.stderr)
+    resp = make_request("/chat/completions", key, payload, stream=True)
+    full = b""
+    last_progress = ""
+    for line in resp:
+        full += line
+        line_str = line.decode().strip()
+        if "进度" in line_str:
+            try:
+                data = json.loads(line_str.removeprefix("data: "))
+                content = data["choices"][0]["delta"].get("content", "")
+                if content.strip() and content != last_progress:
+                    last_progress = content.strip()
+                    print(f"\r{last_progress}", end="", file=sys.stderr, flush=True)
+            except Exception:
+                pass
+    print(file=sys.stderr)
+    full_str = full.decode(errors="replace")
+    # Extract video URL
+    match = re.search(r'src=\\"(https://[^"\\]+\.mp4)\\"', full_str)
+    if match:
+        print("Video URL:", match.group(1))
+    else:
+        # Try unescaped variant
+        match = re.search(r'src="(https://[^"]+\.mp4)"', full_str)
+        if match:
+            print("Video URL:", match.group(1))
+        else:
+            print("Could not extract video URL. Raw output:", file=sys.stderr)
+            print(full_str[-500:], file=sys.stderr)
+    # Extract preview image
+    match_img = re.search(r'poster=\\"(https://[^"\\]+)\\"', full_str)
+    if match_img:
+        print("Preview URL:", match_img.group(1))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Grok API CLI")
     parser.add_argument("--key", help="API key (overrides GROK_API_KEY env var)")
@@ -159,6 +219,16 @@ def main():
     # verify
     p_verify = sub.add_parser("verify", help="Verify API key is valid")
     p_verify.set_defaults(func=cmd_verify)
+
+    # image
+    p_image = sub.add_parser("image", help="Generate an image from a text prompt")
+    p_image.add_argument("prompt", help="Image description")
+    p_image.set_defaults(func=cmd_image)
+
+    # video
+    p_video = sub.add_parser("video", help="Generate a video from a text prompt")
+    p_video.add_argument("prompt", help="Video description")
+    p_video.set_defaults(func=cmd_video)
 
     args = parser.parse_args()
     args.func(args)

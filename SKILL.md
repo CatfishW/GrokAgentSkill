@@ -1,6 +1,6 @@
 ---
 name: grok-api
-description: Call Grok LLM models (grok-3, grok-3-fast, grok-3-mini, etc.) via an OpenAI-compatible API proxy. Use this skill whenever the user wants to chat with Grok, generate text, or integrate Grok into their application.
+description: Call Grok LLM models (grok-3, grok-3-fast, grok-3-mini, etc.) and generate images/videos via an OpenAI-compatible API proxy. Use this skill whenever the user wants to chat with Grok, generate text, create images, or generate videos.
 ---
 
 # Grok API (via grok2api)
@@ -307,6 +307,137 @@ client.chat.completions.create(
     temperature=0,
 )
 ```
+
+## Image Generation
+
+Use model `grok-imagine-1.0` to generate images from a text prompt.
+
+```bash
+curl -s -X POST https://mc.agaii.org/grok/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <app_key>" \
+  -d '{
+    "model": "grok-imagine-1.0",
+    "messages": [{"role": "user", "content": "A photorealistic red apple on a wooden table"}]
+  }'
+```
+
+The response content will contain an `<img>` tag with a `src` URL pointing to the generated image.
+
+**Parse the image URL from the response:**
+```python
+import re
+content = response["choices"][0]["message"]["content"]
+match = re.search(r'src="([^"]+)"', content)
+image_url = match.group(1) if match else None
+```
+
+### Image editing
+
+Use model `grok-imagine-1.0-edit` with an existing image URL in the prompt:
+
+```bash
+-d '{"model": "grok-imagine-1.0-edit", "messages": [{"role": "user", "content": "Make the apple golden. Image: https://..."}]}'
+```
+
+---
+
+## Video Generation
+
+Use model `grok-imagine-1.0-video` to generate short videos from a text prompt.
+
+**Important:** The API streams progress updates as SSE chunks (percent complete), then delivers the final video URL embedded in HTML at 100%. You MUST stream the response and parse the final chunk for the video URL.
+
+### Step-by-step workflow
+
+**1. Submit the request (streaming required):**
+```bash
+curl -s -X POST https://mc.agaii.org/grok/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <app_key>" \
+  -d '{
+    "model": "grok-imagine-1.0-video",
+    "messages": [{"role": "user", "content": "<your video prompt>"}]
+  }' > /tmp/video_response.txt
+```
+
+**2. Extract the video URL from the streamed output:**
+```bash
+grep -oP 'src=\\"https://[^"]+\.mp4\\"' /tmp/video_response.txt | head -1 | grep -oP 'https://[^"\\]+'
+```
+
+Or in Python:
+```python
+import re, subprocess, json
+
+# Run curl and capture all SSE lines
+output = subprocess.check_output([
+    "curl", "-s", "-X", "POST",
+    "https://mc.agaii.org/grok/v1/chat/completions",
+    "-H", "Content-Type: application/json",
+    "-H", f"Authorization: Bearer {api_key}",
+    "-d", json.dumps({
+        "model": "grok-imagine-1.0-video",
+        "messages": [{"role": "user", "content": prompt}]
+    })
+], timeout=300).decode()
+
+# Extract video URL
+match = re.search(r'src=\\"(https://[^"\\]+\.mp4)\\"', output)
+video_url = match.group(1) if match else None
+print("Video URL:", video_url)
+```
+
+**3. Download the video:**
+```bash
+wget -O output.mp4 "<video_url>"
+# or
+curl -L -o output.mp4 "<video_url>"
+```
+
+### Using the bundled script
+
+```bash
+GROK_API_KEY=<key> python scripts/grok_api.py video "A glowing figure rotating in the dark"
+```
+
+This will print the video URL when generation completes (typically takes 20–60 seconds).
+
+### Progress tracking
+
+During generation the API streams lines like:
+```
+正在生成视频中，当前进度1%
+正在生成视频中，当前进度25%
+...
+正在生成视频中，当前进度100%
+<video id="video" ...><source src="https://.../generated_video.mp4" ...></video>
+```
+
+The final content after 100% contains the `<video>` HTML with the mp4 URL and a preview image (poster).
+
+### Preview image
+
+The poster/thumbnail URL is also embedded:
+```
+poster="https://mc.agaii.org/grok/v1/files/image/.../preview_image.jpg"
+```
+
+Extract with:
+```python
+match = re.search(r'poster=\\"(https://[^"\\]+)\\"', output)
+preview_url = match.group(1) if match else None
+```
+
+### Tips for good video prompts
+
+- Describe **subject**, **motion**, **camera movement**, and **lighting** explicitly
+- Mention **tone** (cinematic, futuristic, elegant, etc.)
+- Keep prompts under 300 words
+- Dark backgrounds with glowing elements tend to render well
+- Specify duration feel with pacing words ("slowly pulls back", "quick cut", etc.)
+
+---
 
 ## Troubleshooting
 
