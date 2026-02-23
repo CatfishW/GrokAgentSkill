@@ -121,8 +121,12 @@ def cmd_models(args):
 
 def cmd_verify(args):
     key = get_key(args)
-    result = make_request("/admin/verify", key)
-    print(json.dumps(result, indent=2))
+    # Use /models as a lightweight auth check (works with user sk- keys)
+    result = make_request("/models", key)
+    models = [m["id"] for m in result.get("data", [])]
+    print(f"OK — {len(models)} models available")
+    for m in models:
+        print(f"  {m}")
 
 
 def main():
