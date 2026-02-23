@@ -1,3 +1,8 @@
+---
+name: grok-api
+description: Call Grok LLM models (grok-3, grok-3-fast, grok-3-mini, etc.) via an OpenAI-compatible API proxy. Use this skill whenever the user wants to chat with Grok, generate text, or integrate Grok into their application.
+---
+
 # Grok API (via grok2api)
 
 OpenAI-compatible Grok API proxy hosted at `https://mc.agaii.org/grok`. Use this skill whenever the user asks you to call Grok models, generate text with Grok, or interact with the Grok API.
